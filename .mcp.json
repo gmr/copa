@@ -1,0 +1,11 @@
+{
+  "rhona": {
+    "command": "${CLAUDE_PLUGIN_ROOT}/server/osaurus_agent.py",
+    "env": {
+      "OSAURUS_BASE_URL": "http://127.0.0.1:1337",
+      "OSAURUS_AGENT": "Rhona",
+      "OSAURUS_HISTORY_TURNS": "20",
+      "OSAURUS_TRANSCRIPT_DIR": "${CLAUDE_PLUGIN_DATA}/transcripts"
+    }
+  }
+}

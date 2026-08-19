@@ -1,0 +1,23 @@
+{
+  "name": "copa",
+  "description": "Local marketplace for the copa Osaurus agent bridge.",
+  "owner": {
+    "name": "Gavin M. Roy",
+    "email": "gavinr@aweber.com"
+  },
+  "plugins": [
+    {
+      "name": "copa",
+      "source": "./",
+      "description": "Bridges Claude Code to a local Osaurus server-side agent over stdio MCP.",
+      "version": "0.1.0",
+      "license": "BSD-3-Clause",
+      "keywords": [
+        "osaurus",
+        "mcp",
+        "agent",
+        "local-llm"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "copa",
+  "displayName": "Copa",
+  "version": "0.1.0",
+  "description": "Bridges Claude Code to a local Osaurus server-side agent over stdio MCP.",
+  "author": {
+    "name": "Gavin M. Roy",
+    "email": "gavinr@aweber.com"
+  },
+  "license": "BSD-3-Clause",
+  "keywords": ["osaurus", "mcp", "agent", "local-llm"]
+}
