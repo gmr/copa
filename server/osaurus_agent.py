@@ -20,12 +20,19 @@ The run request goes through the Osaurus Secure Channel (``/secure/session``
 and ``/secure/call``). Osaurus refuses plaintext agent runs with 426 when it
 does not trust the caller as local, for example when "Expose to network" is
 on. The server signs the handshake with the agent key; the client verifies
-the signature against the agent ``address`` from ``GET /agents``.
+the signature against ``OSAURUS_AGENT_ADDRESS`` when it is set, or else
+against the agent ``address`` from ``GET /agents``.
+
+``GET /agents`` is plaintext and carries the access key, so it is refused for
+a non-loopback ``http://`` server. Set ``OSAURUS_AGENT_ID`` and
+``OSAURUS_AGENT_ADDRESS`` to skip it.
 
 Configuration (environment):
     OSAURUS_BASE_URL      Default http://127.0.0.1:1337
     OSAURUS_AGENT         Agent name to resolve through GET /agents
     OSAURUS_AGENT_ID      Agent UUID; selects the agent by id, not by name
+    OSAURUS_AGENT_ADDRESS Agent address (0x...) to pin for the secure channel.
+                          With OSAURUS_AGENT_ID, skips GET /agents
     OSAURUS_MODEL         Overrides the agent's default_model
     OSAURUS_API_KEY       osk-v1 key; required when Osaurus is exposed to the network
     OSAURUS_HISTORY_TURNS Turns of history to resend. Default 20
@@ -40,6 +47,7 @@ import asyncio
 import base64
 import dataclasses
 import hashlib
+import ipaddress
 import json
 import os
 import pathlib
@@ -47,6 +55,7 @@ import re
 import sys
 import typing
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 
 import coincurve
 import httpx
@@ -63,6 +72,7 @@ from mcp.server.mcpserver import MCPServer
 BASE_URL = os.environ.get('OSAURUS_BASE_URL', 'http://127.0.0.1:1337').rstrip('/')
 AGENT_NAME = os.environ.get('OSAURUS_AGENT', 'agent')
 AGENT_ID = os.environ.get('OSAURUS_AGENT_ID')
+AGENT_ADDRESS = (os.environ.get('OSAURUS_AGENT_ADDRESS') or '').lower() or None
 MODEL = os.environ.get('OSAURUS_MODEL')
 API_KEY = os.environ.get('OSAURUS_API_KEY')
 HISTORY_TURNS = int(os.environ.get('OSAURUS_HISTORY_TURNS', '20'))
@@ -97,7 +107,24 @@ def headers() -> dict[str, str]:
     return value
 
 
+def plaintext_remote() -> bool:
+    """Return True when BASE_URL is plain HTTP to a non-loopback host."""
+    parts = urlsplit(BASE_URL)
+    if parts.scheme != 'http' or parts.hostname == 'localhost':
+        return False
+    try:
+        return not ipaddress.ip_address(parts.hostname or '').is_loopback
+    except ValueError:
+        return True
+
+
 async def list_agents(client: httpx.AsyncClient) -> list[dict[str, typing.Any]]:
+    if plaintext_remote():
+        raise RuntimeError(
+            f'Refusing plaintext GET /agents to {BASE_URL}: it would expose the '
+            'access key and the agent address. Use https, or set '
+            'OSAURUS_AGENT_ID and OSAURUS_AGENT_ADDRESS.'
+        )
     response = await client.get(f'{BASE_URL}/agents', headers=headers())
     response.raise_for_status()
     return response.json().get('agents', [])
@@ -105,6 +132,9 @@ async def list_agents(client: httpx.AsyncClient) -> list[dict[str, typing.Any]]:
 
 async def resolve_agent(client: httpx.AsyncClient) -> tuple[str, str | None, str]:
     """Return the (agent id, model, address) to run, resolving the agent once."""
+    if 'id' not in RESOLVED and AGENT_ID and AGENT_ADDRESS:
+        RESOLVED['id'], RESOLVED['model'] = AGENT_ID, MODEL
+        RESOLVED['address'] = AGENT_ADDRESS
     if 'id' not in RESOLVED:
         agents = await list_agents(client)
         if AGENT_ID:
@@ -124,6 +154,11 @@ async def resolve_agent(client: httpx.AsyncClient) -> tuple[str, str | None, str
             raise RuntimeError(
                 f'Osaurus agent {match["name"]!r} has no address, so the secure '
                 'channel cannot verify it. Use a custom agent.'
+            )
+        if AGENT_ADDRESS and match['address'].lower() != AGENT_ADDRESS:
+            raise RuntimeError(
+                f'Osaurus agent {match["name"]!r} has address {match["address"]}, '
+                f'not the pinned OSAURUS_AGENT_ADDRESS {AGENT_ADDRESS}.'
             )
         RESOLVED['id'] = match['id']
         RESOLVED['model'] = MODEL or match.get('default_model')
@@ -434,7 +469,10 @@ def main() -> None:
         async def show() -> None:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 for agent in await list_agents(client):
-                    print(f'{agent["id"]}  {agent["name"]}  {agent.get("default_model")}')
+                    print(
+                        f'{agent["id"]}  {agent["name"]}  {agent.get("address")}  '
+                        f'{agent.get("default_model")}'
+                    )
 
         asyncio.run(show())
         return

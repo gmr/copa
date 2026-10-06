@@ -25,7 +25,10 @@ copa/
 2. On the first tool call the server calls `GET /agents` and matches
    `OSAURUS_AGENT` by name to get the agent UUID, its `default_model`, and its
    `address`. Set `OSAURUS_AGENT_ID` to match by UUID instead. The built-in
-   `Osaurus` agent has no address, so it cannot be used.
+   `Osaurus` agent has no address, so it cannot be used. When both
+   `OSAURUS_AGENT_ID` and `OSAURUS_AGENT_ADDRESS` are set, the lookup is
+   skipped and the model is `OSAURUS_MODEL` or the agent's server-side
+   default.
 3. The tool is named after the agent, so `OSAURUS_AGENT=Rhona` exposes
    `ask_rhona(prompt, session_id)`.
 4. Conversation history is kept in memory per `session_id` and resent on each
@@ -35,7 +38,7 @@ copa/
    Osaurus refuses plaintext agent runs with `426 secure_channel_required` when
    it does not trust the caller as local, for example when "Expose to network"
    is on. The server opens a session with `POST /secure/session`, verifies that
-   the agent's `address` signed the handshake, and sends the run as an
+   the agent's address signed the handshake, and sends the run as an
    encrypted `POST /secure/call`. Sessions are reused until one minute before
    they expire, and are opened again if Osaurus restarts.
 6. Osaurus runs its own tool loop; the server decrypts the SSE stream, keeps the
@@ -54,10 +57,20 @@ Claude Code.
 | `OSAURUS_BASE_URL`       | `http://127.0.0.1:1337`             | Osaurus server                              |
 | `OSAURUS_AGENT`          | `agent`                             | Agent name; also names the tool             |
 | `OSAURUS_AGENT_ID`       | unset                               | Agent UUID; matches by UUID, not by name    |
+| `OSAURUS_AGENT_ADDRESS`  | address from `GET /agents`          | Pinned agent address for the handshake      |
 | `OSAURUS_MODEL`          | agent `default_model`               | Model override                              |
 | `OSAURUS_API_KEY`        | unset                               | `osk-v1` key; required for exposed servers  |
 | `OSAURUS_HISTORY_TURNS`  | `20`                                | Turns of history resent per call            |
 | `OSAURUS_TRANSCRIPT_DIR` | `${CLAUDE_PLUGIN_DATA}/transcripts` | Transcript location                         |
+
+### Remote servers
+
+`GET /agents` is plaintext and sends the access key, and the address it
+returns is what the secure channel handshake is checked against. Copa refuses
+that request when `OSAURUS_BASE_URL` is `http://` to a non-loopback host. For
+such a server, set `OSAURUS_AGENT_ID` and `OSAURUS_AGENT_ADDRESS` from
+`./server/osaurus_agent.py --list` run on the Osaurus machine itself, or use
+`https://`.
 
 ## Transcripts
 
@@ -90,7 +103,7 @@ agent never answered.
 `uv` must be on `PATH`. Confirm the agent is reachable first:
 
 ```bash
-./server/osaurus_agent.py --list      # prints agent UUIDs, names, and models
+./server/osaurus_agent.py --list      # prints agent UUIDs, names, addresses, and models
 ```
 
 Set `OSAURUS_AGENT` in `.mcp.json` to the name that command prints. Then pick one
