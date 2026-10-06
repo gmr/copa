@@ -448,7 +448,7 @@ async def run_agent(prompt: str, session_id: str) -> str:
     return reply
 
 
-mcp = MCPServer(name=f'osaurus-{slug(AGENT_NAME)}', version='0.2.0')
+mcp = MCPServer(name=f'osaurus-{slug(AGENT_NAME)}', version='0.2.1')
 
 
 @mcp.tool(
