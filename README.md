@@ -23,16 +23,25 @@ copa/
    isolated environment from the PEP 723 block in the file, so there is no
    virtualenv to manage.
 2. On the first tool call the server calls `GET /agents` and matches
-   `OSAURUS_AGENT` by name to get the agent UUID and its `default_model`. Set
-   `OSAURUS_AGENT_ID` to skip the lookup.
+   `OSAURUS_AGENT` by name to get the agent UUID, its `default_model`, and its
+   `address`. Set `OSAURUS_AGENT_ID` to match by UUID instead. The built-in
+   `Osaurus` agent has no address, so it cannot be used.
 3. The tool is named after the agent, so `OSAURUS_AGENT=Rhona` exposes
    `ask_rhona(prompt, session_id)`.
 4. Conversation history is kept in memory per `session_id` and resent on each
    call, trimmed to the last `OSAURUS_HISTORY_TURNS` turns.
-5. The history is posted to `POST /agents/{id}/run` with `stream: true`. Osaurus
-   runs its own tool loop; the server consumes the SSE stream, keeps the
-   `choices[].delta.content` text, and ignores execution hints.
-6. The final text is returned to Claude Code and appended to the session
+5. The history is posted to `POST /agents/{id}/run` with `stream: true`, inside
+   the Osaurus [Secure Channel](https://docs.osaurus.ai/secure-channel).
+   Osaurus refuses plaintext agent runs with `426 secure_channel_required` when
+   it does not trust the caller as local, for example when "Expose to network"
+   is on. The server opens a session with `POST /secure/session`, verifies that
+   the agent's `address` signed the handshake, and sends the run as an
+   encrypted `POST /secure/call`. Sessions are reused until one minute before
+   they expire, and are opened again if Osaurus restarts.
+6. Osaurus runs its own tool loop; the server decrypts the SSE stream, keeps the
+   `choices[].delta.content` text, and ignores execution hints. A stream that
+   ends without the authenticated `fin` frame is an error.
+7. The final text is returned to Claude Code and appended to the session
    transcript.
 
 ## Configuration
@@ -44,9 +53,9 @@ Claude Code.
 | ------------------------ | ----------------------------------- | ------------------------------------------- |
 | `OSAURUS_BASE_URL`       | `http://127.0.0.1:1337`             | Osaurus server                              |
 | `OSAURUS_AGENT`          | `agent`                             | Agent name; also names the tool             |
-| `OSAURUS_AGENT_ID`       | unset                               | Agent UUID; skips name resolution           |
+| `OSAURUS_AGENT_ID`       | unset                               | Agent UUID; matches by UUID, not by name    |
 | `OSAURUS_MODEL`          | agent `default_model`               | Model override                              |
-| `OSAURUS_API_KEY`        | unset                               | `osk-v1` key; only for non-loopback servers |
+| `OSAURUS_API_KEY`        | unset                               | `osk-v1` key; required for exposed servers  |
 | `OSAURUS_HISTORY_TURNS`  | `20`                                | Turns of history resent per call            |
 | `OSAURUS_TRANSCRIPT_DIR` | `${CLAUDE_PLUGIN_DATA}/transcripts` | Transcript location                         |
 
