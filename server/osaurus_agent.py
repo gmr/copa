@@ -49,12 +49,14 @@ from __future__ import annotations
 import asyncio
 import base64
 import dataclasses
+import fcntl
 import hashlib
 import ipaddress
 import json
 import os
 import pathlib
 import re
+import stat
 import sys
 import typing
 from datetime import datetime, timezone
@@ -411,15 +413,30 @@ def delta(payload: dict[str, typing.Any]) -> str:
 
 
 def read_workspace_file(path: str) -> str:
-    """Return a UTF-8 file from WORKSPACE_ROOT; refuse any path outside it."""
-    candidate = (WORKSPACE_ROOT / path).resolve()
-    if not candidate.is_relative_to(WORKSPACE_ROOT):
-        raise ValueError(f'File must be inside {WORKSPACE_ROOT}: {path!r}')
-    if not candidate.is_file():
-        raise ValueError(f'Workspace file does not exist: {path!r}')
-    if candidate.stat().st_size > MAX_FILE_BYTES:
-        raise ValueError(f'Workspace file exceeds {MAX_FILE_BYTES} bytes: {path!r}')
-    return candidate.read_text(encoding='utf-8')
+    """Return a UTF-8 file from WORKSPACE_ROOT; refuse any path outside it.
+
+    The sandboxed agent can write to WORKSPACE_ROOT, so it can swap a path
+    for a symlink at any time. The checks therefore use the open descriptor
+    and its real path (F_GETPATH), not the path name. O_NONBLOCK stops a
+    FIFO from blocking the open.
+    """
+    try:
+        fd = os.open(WORKSPACE_ROOT / path, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError as error:
+        raise ValueError(f'Cannot open workspace file {path!r}: {error}') from None
+    with os.fdopen(fd, 'rb') as handle:
+        real = fcntl.fcntl(fd, fcntl.F_GETPATH, bytes(1024))
+        real_path = pathlib.Path(os.fsdecode(real.split(b'\0', 1)[0]))
+        if not real_path.is_relative_to(WORKSPACE_ROOT):
+            raise ValueError(f'File must be inside {WORKSPACE_ROOT}: {path!r}')
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise ValueError(f'Workspace path is not a regular file: {path!r}')
+        if info.st_size > MAX_FILE_BYTES:
+            raise ValueError(
+                f'Workspace file exceeds {MAX_FILE_BYTES} bytes: {path!r}'
+            )
+        return handle.read(MAX_FILE_BYTES + 1)[:MAX_FILE_BYTES].decode('utf-8')
 
 
 def attach(prompt: str, files: list[str]) -> str:
