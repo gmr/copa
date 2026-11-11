@@ -37,6 +37,9 @@ Configuration (environment):
     OSAURUS_API_KEY       osk-v1 key; required when Osaurus is exposed to the network
     OSAURUS_HISTORY_TURNS Turns of history to resend. Default 20
     OSAURUS_TRANSCRIPT_DIR  Where Markdown transcripts are written
+    OSAURUS_WORKSPACE_ROOT  Only folder the files argument can read from.
+                          Default ~/.osaurus/container/workspace/shared
+    OSAURUS_MAX_FILE_BYTES  Size limit for each attached file. Default 262144
 
 Run with ``--list`` to print the available agents and their UUIDs.
 """
@@ -80,6 +83,15 @@ TRANSCRIPT_DIR = pathlib.Path(
     os.environ.get('OSAURUS_TRANSCRIPT_DIR')
     or pathlib.Path(__file__).resolve().parent.parent / 'transcripts'
 )
+WORKSPACE_ROOT = (
+    pathlib.Path(
+        os.environ.get('OSAURUS_WORKSPACE_ROOT')
+        or pathlib.Path.home() / '.osaurus/container/workspace/shared'
+    )
+    .expanduser()
+    .resolve()
+)
+MAX_FILE_BYTES = int(os.environ.get('OSAURUS_MAX_FILE_BYTES', '262144'))
 
 Message = dict[str, str]
 
@@ -398,6 +410,33 @@ def delta(payload: dict[str, typing.Any]) -> str:
     return ''
 
 
+def read_workspace_file(path: str) -> str:
+    """Return a UTF-8 file from WORKSPACE_ROOT; refuse any path outside it."""
+    candidate = (WORKSPACE_ROOT / path).resolve()
+    if not candidate.is_relative_to(WORKSPACE_ROOT):
+        raise ValueError(f'File must be inside {WORKSPACE_ROOT}: {path!r}')
+    if not candidate.is_file():
+        raise ValueError(f'Workspace file does not exist: {path!r}')
+    if candidate.stat().st_size > MAX_FILE_BYTES:
+        raise ValueError(f'Workspace file exceeds {MAX_FILE_BYTES} bytes: {path!r}')
+    return candidate.read_text(encoding='utf-8')
+
+
+def attach(prompt: str, files: list[str]) -> str:
+    """Append the named workspace files to the prompt."""
+    if not files:
+        return prompt
+    blocks = [
+        f'<workspace_file path="{path}">\n{read_workspace_file(path)}\n</workspace_file>'
+        for path in files
+    ]
+    return (
+        f'{prompt}\n\nThe following files are supplied from the shared workspace. '
+        'Use them directly; do not try to open them with tools.\n\n'
+        + '\n\n'.join(blocks)
+    )
+
+
 async def run_agent(prompt: str, session_id: str) -> str:
     messages = HISTORY.setdefault(session_id, [])
     messages.append({'role': 'user', 'content': prompt})
@@ -456,11 +495,16 @@ mcp = MCPServer(name=f'osaurus-{slug(AGENT_NAME)}', version='0.2.1')
     description=(
         f'Ask the Osaurus agent {AGENT_NAME!r} a question. The agent runs its own '
         'tool loop locally and returns a final answer. Conversation history is kept '
-        'per session_id, so pass the same session_id to continue a discussion.'
+        'per session_id, so pass the same session_id to continue a discussion. '
+        'The agent cannot read files itself: to share files, put them in '
+        f'{WORKSPACE_ROOT} and pass their paths, relative to that folder, in files. '
+        'Their contents are sent with the prompt.'
     ),
 )
-async def ask(prompt: str, session_id: str = 'default') -> str:
-    return await run_agent(prompt, session_id)
+async def ask(
+    prompt: str, session_id: str = 'default', files: list[str] | None = None
+) -> str:
+    return await run_agent(attach(prompt, files or []), session_id)
 
 
 def main() -> None:

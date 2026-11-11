@@ -62,6 +62,21 @@ Claude Code.
 | `OSAURUS_API_KEY`        | unset                               | `osk-v1` key; required for exposed servers  |
 | `OSAURUS_HISTORY_TURNS`  | `20`                                | Turns of history resent per call            |
 | `OSAURUS_TRANSCRIPT_DIR` | `${CLAUDE_PLUGIN_DATA}/transcripts` | Transcript location                         |
+| `OSAURUS_WORKSPACE_ROOT` | `~/.osaurus/container/workspace/shared` | Only folder `files` can read from       |
+| `OSAURUS_MAX_FILE_BYTES` | `262144`                            | Size limit for each attached file           |
+
+### Sharing files
+
+Server-side agent runs have no file tools, so the agent cannot open files
+itself. Put the files in `OSAURUS_WORKSPACE_ROOT` and pass their paths,
+relative to that folder, in `files`:
+
+```
+ask_rhona(prompt="Review this plan.", files=["claude-settings-plan/plan.md"])
+```
+
+The server reads each file and sends its contents with the prompt. It refuses
+paths outside the root, missing files, and files over the size limit.
 
 ### Remote servers
 
